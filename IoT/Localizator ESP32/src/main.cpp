@@ -1,16 +1,18 @@
-#define TINY_GSM_DEBUG Serial
+//#define TINY_GSM_DEBUG Serial
 
 #define TINY_GSM_MODEM_SIM7000
 #define APN "simbase"
 
 #include "Arduino.h"
 #include "TinyGsmClient.h"
-#include <StreamDebugger.h>
+#include "StreamDebugger.h"
+#include "ESP32Time.h"
 #include "secrets.h"
 
-StreamDebugger debugger(Serial2, Serial);
-TinyGsm modem (debugger);
+//StreamDebugger debugger(Serial2, Serial);
+TinyGsm modem (Serial2);
 TinyGsmClient client(modem);
+ESP32Time rtc;
 
 struct gpsData {
   double lat;
@@ -21,7 +23,7 @@ struct gpsData {
   uint8_t signalQuality;
 };
 
-struct gps {
+struct gnssData {
   float lat;
   float lon;
   float speed;
@@ -29,12 +31,20 @@ struct gps {
   int vsat;
   int usat;
   float accuracy;
+  int year;
+  int month;
+  int day;
+  int hour;
+  int minute;
+  int second;
+  int signalQuality;
 } data;
 
 long unsigned int lastGpsWrite;
 long unsigned int lastGsmWrite;
 long unsigned int lastErrorWrite;
 int lastError;
+int connectionAttempts;
 boolean gpsUpdated;
 gpsData lastGpsData;
 
@@ -68,8 +78,7 @@ void setup() {
   Serial.begin(115200);
   Serial2.begin(115200);
   delay(1000);
-  modem.restart();
-  modem.setNetworkMode(2);
+  modem.init();
   Serial.println("Enabling GPS...");
   modem.enableGPS();
   Serial.println("Waiting for network...");
@@ -80,9 +89,14 @@ void setup() {
 
 void loop() {
   if (millis() - lastGpsWrite > 1000 * 10) {
+    Serial.println();
+    Serial.println();
+    Serial.println();
     Serial.println("Reading GPS data");
     
     modem.getGPS(&data.lat, &data.lon, &data.speed, &data.alt, &data.vsat, &data.usat, &data.accuracy);
+    modem.getGPSTime(&data.year, &data.month, &data.day, &data.hour, &data.minute, &data.second);
+    data.signalQuality = modem.getSignalQuality();
 
     Serial.print("Latitude: ");
     Serial.println(data.lat, 6);
@@ -100,13 +114,24 @@ void loop() {
     Serial.println(data.accuracy);
     Serial.print("Raw GNSS data: ");
     Serial.println(modem.getGPSraw());
-    Serial.print("Signal quality:");
-    Serial.println(modem.getSignalQuality());
+    Serial.print("Signal quality: ");
+    Serial.println(data.signalQuality);
+    Serial.print("Operator: ");
+    Serial.println(modem.getOperator());
+    Serial.print("Network mode: ");
+    Serial.println(modem.getNetworkMode());
+    Serial.print("Time: ");
+    Serial.println(rtc.getTime("%H:%M:%S"));
+
+
+    if (data.year > 2000) {
+      rtc.setTime(data.second, data.minute, data.hour, data.day, data.month, data.year);
+    }
 
     lastGpsWrite = millis();
   }
   
-  if (millis() - lastGsmWrite > 1000 * 10 || (data.speed > 80 && millis() - lastGsmWrite > 1000 * 60)) {
+  if (millis() - lastGsmWrite > 1000 * 120 || (data.speed > 80 && millis() - lastGsmWrite > 1000 * 60)) {
 
     if (data.usat == 0) {
       if (lastErrorWrite + 1000 * 30 < millis() || lastError != 1) {
@@ -139,14 +164,14 @@ void loop() {
       }
     }
 
-    modem.sendAT(GF("+CDNSCFG=\"8.8.8.8\",\"8.8.4.4\""));
+//    modem.sendAT(GF("+CDNSCFG=\"8.8.8.8\",\"8.8.4.4\""));
 
     if (!modem.isGprsConnected()) {
       Serial.println("Connecting to GPRS");
       if (!modem.gprsConnect(APN)) {
         if (lastErrorWrite + 1000 * 30 < millis() || lastError != 3) {
           Serial.println("GPRS failed. Restarting modem");
-//          modem.restart();
+          modem.restart();
           lastErrorWrite = millis();
           lastError = 3;
         }
@@ -154,9 +179,15 @@ void loop() {
       }
     }
 
-    if (!client.connect("vpn.mczop.eu", 2137)) {
+    if (!client.connect("server", 1111)) {
       if (lastErrorWrite + 1000 * 30 < millis() || lastError != 4) {
         Serial.println("Connection failed");
+        connectionAttempts++;
+        if (connectionAttempts > 3) {
+          Serial.println("Too many connection attempts. Restarting modem");
+          modem.restart();
+          connectionAttempts = 0;
+        }
         lastErrorWrite = millis();
         lastError = 4;
       }
@@ -167,8 +198,8 @@ void loop() {
       delay(1);
     }
     
-    client.println("Hejka test");
-    //client.printf("1,%f,%f,%f,%f,%u,%u,%u", data.lat, data.lon, data.alt, data.speed, data.usat, modem.getSignalQuality(), modem.getNetworkMode());
+    //client.println("Hejka test");
+    client.printf("1,%f,%f,%f,%f,%u,%u,%u", data.lat, data.lon, data.alt, data.speed, data.usat, data.signalQuality, modem.getNetworkMode());
     client.stop();
     modem.gprsDisconnect();
     Serial.println("Data sent. Disconnecting and turning off modem");
