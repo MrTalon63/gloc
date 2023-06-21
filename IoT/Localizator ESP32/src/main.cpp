@@ -1,11 +1,15 @@
+#define TINY_GSM_DEBUG Serial
+
 #define TINY_GSM_MODEM_SIM7000
 #define APN "simbase"
 
 #include "Arduino.h"
 #include "TinyGsmClient.h"
+#include <StreamDebugger.h>
 #include "secrets.h"
 
-TinyGsm modem (Serial2);
+StreamDebugger debugger(Serial2, Serial);
+TinyGsm modem (debugger);
 TinyGsmClient client(modem);
 
 struct gpsData {
@@ -65,9 +69,9 @@ void setup() {
   Serial2.begin(115200);
   delay(1000);
   modem.restart();
+  modem.setNetworkMode(2);
   Serial.println("Enabling GPS...");
   modem.enableGPS();
-  modem.sendAT("+CNETSCAN=1");
   Serial.println("Waiting for network...");
   modem.waitForNetwork();  
   Serial.println("Connecting to GPRS...");
@@ -94,6 +98,10 @@ void loop() {
     Serial.println(data.usat);
     Serial.print("Accuracy: ");
     Serial.println(data.accuracy);
+    Serial.print("Raw GNSS data: ");
+    Serial.println(modem.getGPSraw());
+    Serial.print("Signal quality:");
+    Serial.println(modem.getSignalQuality());
 
     lastGpsWrite = millis();
   }
@@ -123,7 +131,7 @@ void loop() {
       if (!modem.waitForNetwork(15000L)) {
         if (lastErrorWrite + 1000 * 30 < millis() || lastError != 2) {
         Serial.println("Network failed. Restarting modem");
-        modem.restart();
+//        modem.restart();
         lastErrorWrite = millis();
         lastError = 2;
         }
@@ -138,7 +146,7 @@ void loop() {
       if (!modem.gprsConnect(APN)) {
         if (lastErrorWrite + 1000 * 30 < millis() || lastError != 3) {
           Serial.println("GPRS failed. Restarting modem");
-          modem.restart();
+//          modem.restart();
           lastErrorWrite = millis();
           lastError = 3;
         }
