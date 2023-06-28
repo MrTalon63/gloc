@@ -1,2 +1,2 @@
-localizator/.pio
-localizator/.vscode
+backend/node_modules
+IoT/Localizator ESP32/src/secrets.h
