@@ -5,14 +5,16 @@
 
 #include "Arduino.h"
 #include "TinyGsmClient.h"
-#include "StreamDebugger.h"
+//#include "StreamDebugger.h"
 #include "ESP32Time.h"
+#include "BluetoothSerial.h"
 #include "secrets.h"
 
 //StreamDebugger debugger(Serial2, Serial);
 TinyGsm modem (Serial2);
 TinyGsmClient client(modem);
 ESP32Time rtc;
+BluetoothSerial SerialBT;
 
 struct gpsData {
   double lat;
@@ -45,6 +47,7 @@ long unsigned int lastGsmWrite;
 long unsigned int lastErrorWrite;
 int lastError;
 int connectionAttempts;
+int networkAttempts;
 boolean gpsUpdated;
 gpsData lastGpsData;
 
@@ -77,13 +80,18 @@ float distanceBetween(float lat1, float long1, float lat2, float long2) {
 void setup() {
   Serial.begin(115200);
   Serial2.begin(115200);
+  SerialBT.begin("ESP32TEST");
+  SerialBT.setPin("2137");
   delay(1000);
-  modem.init();
+  modem.restart();
   Serial.println("Enabling GPS...");
+  SerialBT.println("Enabling GPS...");
   modem.enableGPS();
   Serial.println("Waiting for network...");
+  SerialBT.println("Waiting for network...");
   modem.waitForNetwork();  
   Serial.println("Connecting to GPRS...");
+  SerialBT.println("Connecting to GPRS...");
   modem.gprsConnect(APN);
 }
 
@@ -93,7 +101,12 @@ void loop() {
     Serial.println();
     Serial.println();
     Serial.println("Reading GPS data");
+    SerialBT.println();
+    SerialBT.println();
+    SerialBT.println();
+    SerialBT.println("Reading GPS data");
     
+    modem.enableGPS();
     modem.getGPS(&data.lat, &data.lon, &data.speed, &data.alt, &data.vsat, &data.usat, &data.accuracy);
     modem.getGPSTime(&data.year, &data.month, &data.day, &data.hour, &data.minute, &data.second);
     data.signalQuality = modem.getSignalQuality();
@@ -123,6 +136,30 @@ void loop() {
     Serial.print("Time: ");
     Serial.println(rtc.getTime("%H:%M:%S"));
 
+    SerialBT.print("Latitude: ");
+    SerialBT.println(data.lat, 6);
+    SerialBT.print("Longitude: ");
+    SerialBT.println(data.lon, 6);
+    SerialBT.print("Speed: ");
+    SerialBT.println(data.speed);
+    SerialBT.print("Altitude: ");
+    SerialBT.println(data.alt);
+    SerialBT.print("Visible satellites: ");
+    SerialBT.println(data.vsat);
+    SerialBT.print("Used satellites: ");
+    SerialBT.println(data.usat);
+    SerialBT.print("Accuracy: ");
+    SerialBT.println(data.accuracy);
+    SerialBT.print("Raw GNSS data: ");
+    SerialBT.println(modem.getGPSraw());
+    SerialBT.print("Signal quality: ");
+    SerialBT.println(data.signalQuality);
+    SerialBT.print("Operator: ");
+    SerialBT.println(modem.getOperator());
+    SerialBT.print("Network mode: ");
+    SerialBT.println(modem.getNetworkMode());
+    SerialBT.print("Time: ");
+    SerialBT.println(rtc.getTime("%H:%M:%S"));
 
     if (data.year > 2000) {
       rtc.setTime(data.second, data.minute, data.hour, data.day, data.month, data.year);
@@ -136,6 +173,7 @@ void loop() {
     if (data.usat == 0) {
       if (lastErrorWrite + 1000 * 30 < millis() || lastError != 1) {
         Serial.println("No usable satellites. re-enabling GPS");
+        SerialBT.println("No usable satellites. re-enabling GPS");
         modem.enableGPS();
         lastErrorWrite = millis();
         lastError = 1;
@@ -143,34 +181,46 @@ void loop() {
       return;
     }
 
-//    if (lastGpsData.lat != 0.0 && distanceBetween(lastGpsData.lat, lastGpsData.lng, data.lat, data.lon) < 25 && millis() - lastGsmWrite < 1000 * 60 * 10) {
-//      Serial.println("GPS location not changed, vehicle is probably stationary. Returning...");
-//      lastGsmWrite = millis();
-//      lastError = 255;
-//      gpsUpdated = false;
-//      return;
-//    }
+    if (lastGpsData.lat != 0.0 && distanceBetween(lastGpsData.lat, lastGpsData.lng, data.lat, data.lon) < 20 && millis() - lastGsmWrite < 1000 * 60 * 15) {
+      if (lastErrorWrite + 1000 * 60 < millis() || lastError != 250) {
+        Serial.println("GPS location not changed, vehicle is probably stationary. Returning...");
+        SerialBT.println("GPS location not changed, vehicle is probably stationary. Returning...");
+        lastError = 250;
+        lastErrorWrite = millis();
+      }
+      gpsUpdated = false;
+      return;
+    }
 
     if (!modem.isNetworkConnected()) {
       Serial.println("Waiting for network");
-      if (!modem.waitForNetwork(15000L)) {
+      SerialBT.println("Waiting for network");
+      if (!modem.waitForNetwork(5000L)) {
+        networkAttempts++;
+        if (networkAttempts > 10) {
+          Serial.println("Network failed, too many attempts. Restarting modem");
+          SerialBT.println("Network failed, too many attempts. Restarting modem");
+          modem.restart();
+          networkAttempts = 0;
+        }
         if (lastErrorWrite + 1000 * 30 < millis() || lastError != 2) {
-        Serial.println("Network failed. Restarting modem");
+          Serial.println("Network failed.");
+          SerialBT.println("Network failed.");
 //        modem.restart();
-        lastErrorWrite = millis();
-        lastError = 2;
+          lastErrorWrite = millis();
+          lastError = 2;
         }
         return;
       }
     }
 
-//    modem.sendAT(GF("+CDNSCFG=\"8.8.8.8\",\"8.8.4.4\""));
-
     if (!modem.isGprsConnected()) {
       Serial.println("Connecting to GPRS");
+      SerialBT.println("Connecting to GPRS");
       if (!modem.gprsConnect(APN)) {
         if (lastErrorWrite + 1000 * 30 < millis() || lastError != 3) {
           Serial.println("GPRS failed. Restarting modem");
+          SerialBT.println("GPRS failed. Restarting modem");
           modem.restart();
           lastErrorWrite = millis();
           lastError = 3;
@@ -179,12 +229,14 @@ void loop() {
       }
     }
 
-    if (!client.connect("server", 1111)) {
+    if (!client.connect(serverHostname, serverPort)) {
       if (lastErrorWrite + 1000 * 30 < millis() || lastError != 4) {
         Serial.println("Connection failed");
+        SerialBT.println("Connection failed");
         connectionAttempts++;
         if (connectionAttempts > 3) {
           Serial.println("Too many connection attempts. Restarting modem");
+          SerialBT.println("Too many connection attempts. Restarting modem");
           modem.restart();
           connectionAttempts = 0;
         }
@@ -198,11 +250,13 @@ void loop() {
       delay(1);
     }
     
-    //client.println("Hejka test");
-    client.printf("1,%f,%f,%f,%f,%u,%u,%u", data.lat, data.lon, data.alt, data.speed, data.usat, data.signalQuality, modem.getNetworkMode());
+    client.printf("0,%f,%f,%f,%f,%u,%u", data.lat, data.lon, data.alt, data.speed, data.usat, data.signalQuality);
+    delay(50);
     client.stop();
-    modem.gprsDisconnect();
-    Serial.println("Data sent. Disconnecting and turning off modem");
+    Serial.print("Data sent. Payload: ");
+    Serial.printf("0,%f,%f,%f,%f,%u,%u\n", data.lat, data.lon, data.alt, data.speed, data.usat, data.signalQuality);
+    SerialBT.print("Data sent. Payload: ");
+    SerialBT.printf("0,%f,%f,%f,%f,%u,%u\n", data.lat, data.lon, data.alt, data.speed, data.usat, data.signalQuality);
     lastGsmWrite = millis();
     lastError = 255;
     gpsUpdated = false;
