@@ -3,7 +3,7 @@
 -   LG - Location GPS
     Example Packet:
 
-        LG,0,52.5,21.5,118.5,12.5,8,24,5,3.9,12.8,0
+        LG,0,52.5,21.5,118.5,12.5,8,5,3.9,12.8,24,0,Plus
 
     Where
 
@@ -17,7 +17,9 @@
         5 - Accuracy in meters
         3.9 - Battery voltage
         12.8 - Supply voltage (Usually above 12V as it is a car battery)
-        0 - Network type enum (0 - GSM, 1 - NB-IoT, 2 - LTE-M, 3 - LoRa, 4 - WiFi, 5 - Bluetooth/BLE, 6 - Mesh Network, 7 - Other/Custom)
+        24 - Signal Quality (When using GSM it is a SimComs fucked up scale, on LoRa it's RSSI provided by the module)
+        0 - Network type enum (1 - GSM, 2 - NB-IoT, 3 - LTE-M, 4 - LoRa, 5 - WiFi, 6 - Bluetooth/BLE, 7 - Mesh Network, 8 - Other/Custom)
+        Plus - GSM network operator (When using non carrier networks like LoRa, it is empty)
 
     <br>
 

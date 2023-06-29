@@ -1,20 +1,20 @@
-//#define TINY_GSM_DEBUG Serial
 
 #define TINY_GSM_MODEM_SIM7000
 #define APN "simbase"
 
 #include "Arduino.h"
 #include "TinyGsmClient.h"
-//#include "StreamDebugger.h"
 #include "ESP32Time.h"
 #include "BluetoothSerial.h"
 #include "secrets.h"
+#include <Wire.h>
+#include <INA3221.h>
 
-//StreamDebugger debugger(Serial2, Serial);
 TinyGsm modem (Serial2);
 TinyGsmClient client(modem);
 ESP32Time rtc;
 BluetoothSerial SerialBT;
+INA3221 ina(INA3221_ADDR40_GND);
 
 struct gpsData {
   double lat;
@@ -40,6 +40,8 @@ struct gnssData {
   int minute;
   int second;
   int signalQuality;
+  double vbat;
+  double vcc;
 } data;
 
 long unsigned int lastGpsWrite;
@@ -77,6 +79,12 @@ float distanceBetween(float lat1, float long1, float lat2, float long2) {
   return delta * 6372795; 
 };
 
+int getNetworkType() {
+  int networkType = modem.getNetworkMode();
+  if (networkType == 2) return 1;
+  return 3;
+}
+
 void setup() {
   Serial.begin(115200);
   Serial2.begin(115200);
@@ -93,6 +101,12 @@ void setup() {
   Serial.println("Connecting to GPRS...");
   SerialBT.println("Connecting to GPRS...");
   modem.gprsConnect(APN);
+
+  Serial.println("Initializing current sensor...");
+  SerialBT.println("Initializing current sensor...");
+  ina.begin(&Wire);
+  ina.reset();
+  ina.setShuntRes(10, 10, 10);
 }
 
 void loop() {
@@ -110,6 +124,8 @@ void loop() {
     modem.getGPS(&data.lat, &data.lon, &data.speed, &data.alt, &data.vsat, &data.usat, &data.accuracy);
     modem.getGPSTime(&data.year, &data.month, &data.day, &data.hour, &data.minute, &data.second);
     data.signalQuality = modem.getSignalQuality();
+    data.vbat = ina.getVoltage(INA3221_CH1);
+    data.vcc = ina.getVoltage(INA3221_CH3);
 
     Serial.print("Latitude: ");
     Serial.println(data.lat, 6);
@@ -133,6 +149,10 @@ void loop() {
     Serial.println(modem.getOperator());
     Serial.print("Network mode: ");
     Serial.println(modem.getNetworkMode());
+    Serial.print("VBat: ");
+    Serial.println(data.vbat);
+    Serial.print("VCC: ");
+    Serial.println(data.vcc);
     Serial.print("Time: ");
     Serial.println(rtc.getTime("%H:%M:%S"));
 
@@ -158,6 +178,10 @@ void loop() {
     SerialBT.println(modem.getOperator());
     SerialBT.print("Network mode: ");
     SerialBT.println(modem.getNetworkMode());
+    SerialBT.print("VBat: ");
+    SerialBT.println(data.vbat);
+    SerialBT.print("VCC: ");
+    SerialBT.println(data.vcc);
     SerialBT.print("Time: ");
     SerialBT.println(rtc.getTime("%H:%M:%S"));
 
@@ -182,9 +206,9 @@ void loop() {
     }
 
     if (lastGpsData.lat != 0.0 && distanceBetween(lastGpsData.lat, lastGpsData.lng, data.lat, data.lon) < 20 && millis() - lastGsmWrite < 1000 * 60 * 15) {
-      if (lastErrorWrite + 1000 * 60 < millis() || lastError != 250) {
-        Serial.println("GPS location not changed, vehicle is probably stationary. Returning...");
-        SerialBT.println("GPS location not changed, vehicle is probably stationary. Returning...");
+      if (lastErrorWrite + 1000 * 30 < millis() || lastError != 250) {
+        Serial.println("GPS location not changed, vehicle is probably stationary. Time since last GSM write: " + String((millis() - lastGsmWrite) / 1000) + "s");
+        SerialBT.println("GPS location not changed, vehicle is probably stationary. Time since last GSM write: " + String((millis() - lastGsmWrite) / 1000) + "s");
         lastError = 250;
         lastErrorWrite = millis();
       }
@@ -250,13 +274,14 @@ void loop() {
       delay(1);
     }
     
-    client.printf("0,%f,%f,%f,%f,%u,%u", data.lat, data.lon, data.alt, data.speed, data.usat, data.signalQuality);
+    client.printf("LG,0,%f,%f,%G,%f,%u,%f,%G,%G,%u,%u,%s", data.lat, data.lon, data.alt, data.speed, data.usat, data.accuracy, data.vbat, data.vcc, data.signalQuality, getNetworkType(), modem.getOperator());
+    //client.printf("0,%f,%f,%f,%f,%u,%u", data.lat, data.lon, data.alt, data.speed, data.usat, data.signalQuality);
     delay(50);
     client.stop();
     Serial.print("Data sent. Payload: ");
-    Serial.printf("0,%f,%f,%f,%f,%u,%u\n", data.lat, data.lon, data.alt, data.speed, data.usat, data.signalQuality);
+    Serial.printf("LG,0,%f,%f,%G,%f,%u,%f,%G,%G,%u,%u,%s", data.lat, data.lon, data.alt, data.speed, data.usat, data.accuracy, data.vbat, data.vcc, data.signalQuality, getNetworkType(), modem.getOperator());
     SerialBT.print("Data sent. Payload: ");
-    SerialBT.printf("0,%f,%f,%f,%f,%u,%u\n", data.lat, data.lon, data.alt, data.speed, data.usat, data.signalQuality);
+    SerialBT.printf("LG,0,%f,%f,%G,%f,%u,%f,%G,%G,%u,%u,%s", data.lat, data.lon, data.alt, data.speed, data.usat, data.accuracy, data.vbat, data.vcc, data.signalQuality, getNetworkType(), modem.getOperator());
     lastGsmWrite = millis();
     lastError = 255;
     gpsUpdated = false;

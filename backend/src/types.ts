@@ -1,6 +1,12 @@
-export enum PacketTypes {
-	GpsLocation,
-	LbsLocation,
+export enum NetworkType {
+	GSM = 1,
+	NB_IoT = 2,
+	LTE_M = 3,
+	LoRa = 4,
+	WiFi = 5,
+	Bluetooth = 6,
+	Mesh = 7,
+	Other = 8,
 }
 
 export interface GsmPacket {

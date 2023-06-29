@@ -4,9 +4,9 @@
 	"description": "",
 	"main": "index.js",
 	"scripts": {
-		"build": "tsc build",
+		"build": "tsc",
 		"dev": "nodemon -r dotenv/config src/server.ts",
-		"start": "node build/server.js"
+		"start": "node dist/server.js"
 	},
 	"keywords": [],
 	"author": "mrtalon63 <marcin@mrtalon.eu>",
